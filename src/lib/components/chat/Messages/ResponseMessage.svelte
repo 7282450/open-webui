@@ -48,6 +48,10 @@
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
+	import FollowUps from './ResponseMessage/FollowUps.svelte';
+	import { fade } from 'svelte/transition';
+	import { flyAndScale } from '$lib/utils/transitions';
+	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 
 	interface MessageType {
 		id: string;
@@ -103,6 +107,7 @@
 	export let chatId = '';
 	export let history;
 	export let messageId;
+	export let selectedModels = [];
 
 	let message: MessageType = JSON.parse(JSON.stringify(history.messages[messageId]));
 	$: if (history.messages) {
@@ -113,6 +118,7 @@
 
 	export let siblings;
 
+	export let setInputText: Function = () => {};
 	export let gotoMessage: Function = () => {};
 	export let showPreviousMessage: Function;
 	export let showNextMessage: Function;
@@ -132,6 +138,7 @@
 
 	export let isLastMessage = true;
 	export let readOnly = false;
+	export let topPadding = false;
 
 	let buttonsContainerElement: HTMLDivElement;
 	let showDeleteConfirm = false;
@@ -161,7 +168,7 @@
 			text = `${text}\n\n${$config?.ui?.response_watermark}`;
 		}
 
-		const res = await _copyToClipboard(text, $settings?.copyFormatted ?? false);
+		const res = await _copyToClipboard(text, null, $settings?.copyFormatted ?? false);
 		if (res) {
 			toast.success($i18n.t('Copying to clipboard was successful!'));
 		}
@@ -598,11 +605,13 @@
 		id="message-{message.id}"
 		dir={$settings.chatDirection}
 	>
-		<div class={`shrink-0 ltr:mr-3 rtl:ml-3`}>
+		<div class={`shrink-0 ltr:mr-3 rtl:ml-3 hidden @lg:flex mt-1 `}>
 			<ProfileImage
 				src={model?.info?.meta?.profile_image_url ??
-					($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
-				className={'size-8'}
+					($i18n.language === 'dg-DG'
+						? `${WEBUI_BASE_URL}/doge.png`
+						: `${WEBUI_BASE_URL}/favicon.png`)}
+				className={'size-8 assistant-message-profile-image'}
 			/>
 		</div>
 
@@ -790,13 +799,21 @@
 									<!-- always show message contents even if there's an error -->
 									<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
 									<ContentRenderer
-										id={message.id}
+										id={`${chatId}-${message.id}`}
+										messageId={message.id}
 										{history}
+										{selectedModels}
 										content={message.content}
 										sources={message.sources}
-										floatingButtons={message?.done && !readOnly}
+										floatingButtons={message?.done &&
+											!readOnly &&
+											($settings?.showFloatingActionButtons ?? true)}
 										save={!readOnly}
 										preview={!readOnly}
+										{topPadding}
+										done={($settings?.chatFadeStreamingText ?? true)
+											? (message?.done ?? false)
+											: true}
 										{model}
 										onTaskClick={async (e) => {
 											console.log(e);
@@ -866,12 +883,14 @@
 							{#if siblings.length > 1}
 								<div class="flex self-center min-w-fit" dir="ltr">
 									<button
+										aria-label={$i18n.t('Previous message')}
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
 										on:click={() => {
 											showPreviousMessage(message);
 										}}
 									>
 										<svg
+											aria-hidden="true"
 											xmlns="http://www.w3.org/2000/svg"
 											fill="none"
 											viewBox="0 0 24 24"
@@ -937,10 +956,12 @@
 										on:click={() => {
 											showNextMessage(message);
 										}}
+										aria-label={$i18n.t('Next message')}
 									>
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
 											fill="none"
+											aria-hidden="true"
 											viewBox="0 0 24 24"
 											stroke="currentColor"
 											stroke-width="2.5"
@@ -961,6 +982,7 @@
 									{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
 										<Tooltip content={$i18n.t('Edit')} placement="bottom">
 											<button
+												aria-label={$i18n.t('Edit')}
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
@@ -973,6 +995,7 @@
 													fill="none"
 													viewBox="0 0 24 24"
 													stroke-width="2.3"
+													aria-hidden="true"
 													stroke="currentColor"
 													class="w-4 h-4"
 												>
@@ -989,6 +1012,7 @@
 
 								<Tooltip content={$i18n.t('Copy')} placement="bottom">
 									<button
+										aria-label={$i18n.t('Copy')}
 										class="{isLastMessage
 											? 'visible'
 											: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition copy-response-button"
@@ -999,6 +1023,7 @@
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
 											fill="none"
+											aria-hidden="true"
 											viewBox="0 0 24 24"
 											stroke-width="2.3"
 											stroke="currentColor"
@@ -1016,6 +1041,7 @@
 								{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
+											aria-label={$i18n.t('Read Aloud')}
 											id="speak-button-{message.id}"
 											class="{isLastMessage
 												? 'visible'
@@ -1031,6 +1057,7 @@
 													class=" w-4 h-4"
 													fill="currentColor"
 													viewBox="0 0 24 24"
+													aria-hidden="true"
 													xmlns="http://www.w3.org/2000/svg"
 												>
 													<style>
@@ -1063,6 +1090,7 @@
 													xmlns="http://www.w3.org/2000/svg"
 													fill="none"
 													viewBox="0 0 24 24"
+													aria-hidden="true"
 													stroke-width="2.3"
 													stroke="currentColor"
 													class="w-4 h-4"
@@ -1078,6 +1106,7 @@
 													xmlns="http://www.w3.org/2000/svg"
 													fill="none"
 													viewBox="0 0 24 24"
+													aria-hidden="true"
 													stroke-width="2.3"
 													stroke="currentColor"
 													class="w-4 h-4"
@@ -1096,6 +1125,7 @@
 								{#if $config?.features.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation) && !readOnly}
 									<Tooltip content={$i18n.t('Generate Image')} placement="bottom">
 										<button
+											aria-label={$i18n.t('Generate Image')}
 											class="{isLastMessage
 												? 'visible'
 												: 'invisible group-hover:visible'}  p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
@@ -1107,6 +1137,7 @@
 										>
 											{#if generatingImage}
 												<svg
+													aria-hidden="true"
 													class=" w-4 h-4"
 													fill="currentColor"
 													viewBox="0 0 24 24"
@@ -1141,6 +1172,7 @@
 												<svg
 													xmlns="http://www.w3.org/2000/svg"
 													fill="none"
+													aria-hidden="true"
 													viewBox="0 0 24 24"
 													stroke-width="2.3"
 													stroke="currentColor"
@@ -1173,6 +1205,7 @@
 										placement="bottom"
 									>
 										<button
+											aria-hidden="true"
 											class=" {isLastMessage
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition whitespace-pre-wrap"
@@ -1182,6 +1215,7 @@
 											id="info-{message.id}"
 										>
 											<svg
+												aria-hidden="true"
 												xmlns="http://www.w3.org/2000/svg"
 												fill="none"
 												viewBox="0 0 24 24"
@@ -1203,6 +1237,7 @@
 									{#if !$temporaryChatEnabled && ($config?.features.enable_message_rating ?? true)}
 										<Tooltip content={$i18n.t('Good Response')} placement="bottom">
 											<button
+												aria-label={$i18n.t('Good Response')}
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(
@@ -1221,6 +1256,7 @@
 												}}
 											>
 												<svg
+													aria-hidden="true"
 													stroke="currentColor"
 													fill="none"
 													stroke-width="2.3"
@@ -1239,6 +1275,7 @@
 
 										<Tooltip content={$i18n.t('Bad Response')} placement="bottom">
 											<button
+												aria-label={$i18n.t('Bad Response')}
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(
@@ -1257,6 +1294,7 @@
 												}}
 											>
 												<svg
+													aria-hidden="true"
 													stroke="currentColor"
 													fill="none"
 													stroke-width="2.3"
@@ -1277,16 +1315,18 @@
 									{#if isLastMessage}
 										<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 											<button
+												aria-label={$i18n.t('Continue Response')}
 												type="button"
 												id="continue-response-button"
 												class="{isLastMessage
 													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
 												on:click={() => {
 													continueResponse();
 												}}
 											>
 												<svg
+													aria-hidden="true"
 													xmlns="http://www.w3.org/2000/svg"
 													fill="none"
 													viewBox="0 0 24 24"
@@ -1309,12 +1349,10 @@
 										</Tooltip>
 									{/if}
 
-									<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+									{#if $settings?.regenerateMenu ?? true}
 										<button
 											type="button"
-											class="{isLastMessage
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+											class="hidden regenerate-response-button"
 											on:click={() => {
 												showRateComment = false;
 												regenerateResponse(message);
@@ -1331,32 +1369,104 @@
 													});
 												});
 											}}
+										/>
+
+										<RegenerateMenu
+											onRegenerate={(prompt = null) => {
+												showRateComment = false;
+												regenerateResponse(message, prompt);
+
+												(model?.actions ?? []).forEach((action) => {
+													dispatch('action', {
+														id: action.id,
+														event: {
+															id: 'regenerate-response',
+															data: {
+																messageId: message.id
+															}
+														}
+													});
+												});
+											}}
 										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke-width="2.3"
-												stroke="currentColor"
-												class="w-4 h-4"
+											<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+												<div
+													aria-label={$i18n.t('Regenerate')}
+													class="{isLastMessage
+														? 'visible'
+														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+												>
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="2.3"
+														aria-hidden="true"
+														stroke="currentColor"
+														class="w-4 h-4"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+														/>
+													</svg>
+												</div>
+											</Tooltip>
+										</RegenerateMenu>
+									{:else}
+										<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+											<button
+												type="button"
+												aria-label={$i18n.t('Regenerate')}
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+												on:click={() => {
+													showRateComment = false;
+													regenerateResponse(message);
+
+													(model?.actions ?? []).forEach((action) => {
+														dispatch('action', {
+															id: action.id,
+															event: {
+																id: 'regenerate-response',
+																data: {
+																	messageId: message.id
+																}
+															}
+														});
+													});
+												}}
 											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
-												/>
-											</svg>
-										</button>
-									</Tooltip>
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="2.3"
+													aria-hidden="true"
+													stroke="currentColor"
+													class="w-4 h-4"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+													/>
+												</svg>
+											</button>
+										</Tooltip>
+									{/if}
 
 									{#if siblings.length > 1}
 										<Tooltip content={$i18n.t('Delete')} placement="bottom">
 											<button
 												type="button"
+												aria-label={$i18n.t('Delete')}
 												id="delete-response-button"
 												class="{isLastMessage
 													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
 												on:click={() => {
 													showDeleteConfirm = true;
 												}}
@@ -1367,6 +1477,7 @@
 													viewBox="0 0 24 24"
 													stroke-width="2"
 													stroke="currentColor"
+													aria-hidden="true"
 													class="w-4 h-4"
 												>
 													<path
@@ -1384,6 +1495,7 @@
 											<Tooltip content={action.name} placement="bottom">
 												<button
 													type="button"
+													aria-label={action.name}
 													class="{isLastMessage
 														? 'visible'
 														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
@@ -1424,6 +1536,23 @@
 								});
 							}}
 						/>
+					{/if}
+
+					{#if (isLastMessage || ($settings?.keepFollowUpPrompts ?? false)) && message.done && !readOnly && (message?.followUps ?? []).length > 0}
+						<div class="mt-2.5" in:fade={{ duration: 100 }}>
+							<FollowUps
+								followUps={message?.followUps}
+								onClick={(prompt) => {
+									if ($settings?.insertFollowUpPrompt ?? false) {
+										// Insert the follow-up prompt into the input box
+										setInputText(prompt);
+									} else {
+										// Submit the follow-up prompt directly
+										submitMessage(message?.id, prompt);
+									}
+								}}
+							/>
+						</div>
 					{/if}
 				{/if}
 			</div>
